@@ -1,4 +1,4 @@
 .PHONY: build
 
 build:
-	GOOS=darwin go build -o goStartInstances .
+	GOOS=darwin go build -o main .
