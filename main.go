@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"log"
 
@@ -39,7 +40,22 @@ func main() {
 	if err != nil {
 		log.Printf("Error: %v", err)
 	}
-	fmt.Printf("ASG: %v", res)
+
+	// Main logic
+	for _, v := range res {
+		fmt.Println("ASG name:", v.AutoScaleGroupName)
+		log.Println("Trying to scale out ASG ...")
+		isTrue, err := ScaleOutAsg(svc, v)
+		if err != nil {
+			log.Printf("Error: %v", err)
+			return
+		}
+		if isTrue {
+			log.Println("Scale out was succesfully completed")
+		} else {
+			log.Println("Error: Could not increase ASG, something wrong")
+		}
+	}
 }
 
 func getAsgData(svc *autoscaling.AutoScaling) (*autoscaling.DescribeAutoScalingGroupsOutput, error) {
@@ -67,12 +83,44 @@ func parseAsgData(data *autoscaling.DescribeAutoScalingGroupsOutput) (map[string
 
 		// init instance of structure AutoScaleGroup{}
 		item := AutoScaleGroup{
-			AutoScaleGroupName: *group.AutoScalingGroupName,
-			LaunchTemplate:     *group.LaunchTemplate,
-			TargetGroupARNs:    group.TargetGroupARNs,
+			AutoScaleGroupName:   *group.AutoScalingGroupName,
+			LaunchTemplate:       *group.LaunchTemplate,
+			TargetGroupARNs:      group.TargetGroupARNs,
+			MinSize:              *group.MinSize,
+			MaxSize:              *group.MaxSize,
+			ServiceLinkedRoleARN: *group.ServiceLinkedRoleARN,
+			DesiredSize:          *group.DesiredCapacity,
+			Instances:            group.Instances,
 		}
 
 		m[*group.AutoScalingGroupARN] = &item
 	}
 	return m, nil
+}
+
+// ScaleOutAsg func increase number ASg instances
+func ScaleOutAsg(svc *autoscaling.AutoScaling, group *AutoScaleGroup) (bool, error) {
+	newDesireValue := group.DesiredSize + 1
+
+	if newDesireValue > group.MaxSize {
+		return false, errors.New("Error: ASG can not be scale out -> ASG max size exceeded")
+	}
+
+	if newDesireValue < group.MinSize {
+		return false, errors.New("Error: ASG can not be scale out -> ASG min size bigger")
+	}
+
+	input := &autoscaling.SetDesiredCapacityInput{
+		AutoScalingGroupName: aws.String(asgName),
+		DesiredCapacity:      aws.Int64(newDesireValue),
+		HonorCooldown:        aws.Bool(true),
+	}
+
+	_, err := svc.SetDesiredCapacity(input)
+	if err != nil {
+		return false, err
+	}
+
+	log.Printf("ASG name: %s, new desired number set: %d", group.AutoScaleGroupName, newDesireValue)
+	return true, nil
 }
